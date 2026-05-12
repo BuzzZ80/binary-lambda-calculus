@@ -1,24 +1,44 @@
 #[derive(Clone)]
 enum Term {
-    App(Box<Term>, Box<Term>), // 01xy
-    Lam(Box<Term>),            // 00x
-    Var(u16),                  // x0
+    App(Box<Term>, Box<Term>), // 01xy  (Application)
+    Lam(Box<Term>),            // 00x   (Lambda)
+    Var(u16),                  // x0    (Variable index)
 }
 
 fn main() {
-    let mut input_str = Vec::<u8>::new();
-    std::io::stdin().read_to_end(&mut input_str).unwrap();
+    // Get the contents of the provided file
+    let input_path = match std::env::args().nth(1) {
+        Some(p) => p,
+        None => {
+            println!("Please provide an input filename.");
+            return;
+        }
+    };
 
-    if let Some(mut t) =
-        Term::from_binary(&mut input_str.into_iter().filter(|c| [b'0', b'1'].contains(c)))
-    {
-        println!("before: {t}");
-        println!("      : {t:?}");
-        while t.normal() {}
-        println!(" after: {t}");
-        println!("      : {t:?}");
-    } else {
-        println!("invalid input lol");
+    let input_str = match std::fs::read(input_path) {
+        Ok(s) => s,
+        Err(_) => {
+            println!("Could not read from provided file path.");
+            return;
+        }
+    };
+
+    // Filter anything that isn't a 1 or 0 from the input contents
+    let filtered_program_bits = &mut input_str.into_iter()
+        .filter(|c| [b'0', b'1'].contains(c));
+
+    // Attempt to parse the input
+    match Term::from_binary(filtered_program_bits) {
+        // Print parsed expression, reduce it, then print the result.
+        Some(mut t) => {
+            println!("before: {t}");
+            println!("      : {t:?}");
+            while t.normal() {}
+            println!(" after: {t}");
+            println!("      : {t:?}");
+        }
+        None =>
+            println!("There was an error wile reducing the expression.")
     }
 }
 
@@ -29,25 +49,37 @@ impl Term {
     {
         let first = src.next()?;
 
+        // Term is either a lambda or an application
         if first == b'0' {
-            let second = src.next()?;
-            if second == b'0' {
-                Some(Term::Lam(Box::new(Term::from_binary(src)?)))
-            } else if second == b'1' {
-                Some(Term::App(
+            match src.next() {
+                // wrap the next term in a lambda
+                Some(b'0') => Some(Term::Lam(Box::new(Term::from_binary(src)?))),
+
+                // wrap the next two terms in an Application term
+                Some(b'1') => Some(Term::App(
                     Box::new(Term::from_binary(src)?),
                     Box::new(Term::from_binary(src)?),
-                ))
-            } else {
-                None
+                )),
+
+                Some(c) => panic!("Unexpected character {} in from_binary call's input.", c as char),
+                None => panic!("File ended in the middle of a symbol."),
             }
-        } else if first == b'1' {
+        } 
+        // Term is a variable index
+        else if first == b'1' {
+            // Count the total number of consecutive 1's
             let mut index = 1;
-            while let Some(b'1') = src.next() {
-                index += 1;
+            loop {
+                match src.next() {
+                    Some(b'1') => index += 1,
+                    Some(b'0') => break,
+                    Some(c) => panic!("Unexpected character {} in from_binary call's input.", c as char),
+                    None => panic!("File ended in the middle of a variable index symbol")
+                }
             }
             Some(Term::Var(index))
-        } else {
+        } 
+        else {
             None
         }
     }
@@ -119,7 +151,6 @@ impl Display for Term {
 }
 
 use std::fmt::Debug;
-use std::io::Read;
 impl Debug for Term {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
